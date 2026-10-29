@@ -1,0 +1,79 @@
+# Base44 development stack: runs the cloned source with live reload.
+# Frontend (Vite dev server) is published on host port 3000 and proxies /api to the API.
+name: zapia
+
+services:
+  api:
+    image: python:3.12-slim
+    working_dir: /app
+    command:
+      - sh
+      - -ec
+      - pip install --no-cache-dir -r requirements.txt && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
+    volumes:
+      - ./backend:/app
+      - api_data:/data
+    environment:
+      - DATABASE_PATH=/data/app.db
+      - PYTHONUNBUFFERED=1
+      - WATCHFILES_FORCE_POLLING=true
+    ports:
+      - "8000:8000"
+    labels:
+      base44.project: ZapIA API
+      base44.kind: api
+      base44.port: "8000"
+      base44.docs: /docs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 6
+    restart: on-failure
+
+  web:
+    image: node:22-slim
+    working_dir: /app
+    command:
+      - sh
+      - -ec
+      - npm install --no-audit --no-fund && exec npm run dev
+    volumes:
+      - ./frontend:/app
+      - web_node_modules:/app/node_modules
+    environment:
+      # Vite appends this to server.allowedHosts (platform-provided value).
+      - __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS
+      - BASE44_PREVIEW_MODE
+      - BASE44_SANDBOX_HOST_DOMAIN
+      - API_PROXY_TARGET=http://api:8000
+      - CHOKIDAR_USEPOLLING=true
+    ports:
+      - "3000:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    labels:
+      base44.project: ZapIA
+      base44.kind: web
+      base44.port: "3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:5173/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 6
+    restart: on-failure
+
+volumes:
+  api_data:
+  web_node_modules:
